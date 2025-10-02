@@ -11,17 +11,17 @@ from pytorch_tabnet.tab_model import TabNetClassifier
 @st.cache_resource
 def load_model_and_features():
     """
-    Loads the model by first initializing a new TabNetClassifier structure
-    and then loading the saved weights into it. This is the most robust method.
+    Loads the model using the official pytorch-tabnet `load_model` method,
+    which correctly reconstructs the model and its weights.
     """
-    weights_path = Path('tabnet_network_weights.pth')
+    model_archive_path = Path('tabnet_model.zip')
     features_path = Path('feature_list.json')
 
-    if not weights_path.exists() or not features_path.exists():
-        st.error("Error: Make sure `tabnet_network_weights.pth` and `feature_list.json` are in the repository.")
+    if not model_archive_path.exists() or not features_path.exists():
+        st.error("Error: Make sure `tabnet_model.zip` and `feature_list.json` are in the repository.")
         return None, None
 
-    # Load features first to get model dimensions
+    # Load features
     try:
         with open(features_path, 'r') as f:
             features = json.load(f)
@@ -30,25 +30,20 @@ def load_model_and_features():
         return None, None
 
     try:
-        # 1. Initialize a new, empty TabNetClassifier with the same structure
-        #    NOTE: If you used different parameters during your original training,
-        #    you MUST match them here. These are the defaults from your notebook.
-        model = TabNetClassifier(
-            n_steps=8, n_d=16, n_a=16, gamma=1.5,
-            mask_type="entmax"
-        )
-
-        # 2. Load the saved weights into the empty structure
-        #    map_location='cpu' ensures it loads on the CPU.
-        model.network.load_state_dict(torch.load(weights_path, map_location=torch.device('cpu')))
+        # Initialize an empty TabNetClassifier object to call the load_model method on
+        model = TabNetClassifier()
         
-        # Manually set the device for the wrapper
+        # Load the model from the .zip archive
+        model.load_model(model_archive_path)
+        
+        # Explicitly set the device to CPU for prediction, which is robust
         model.device = 'cpu'
+        model.network.to(torch.device('cpu'))
 
-        st.success("Model weights loaded successfully into new structure.")
+        st.success("Model loaded successfully from archive.")
 
     except Exception as e:
-        st.error(f"Failed to load the model weights. Error: {e}")
+        st.error(f"Failed to load the model from archive. Error: {e}")
         return None, None
 
     return model, features
@@ -109,8 +104,22 @@ if model and feature_names:
 
             except Exception as e:
                 st.error(f"An error occurred during prediction: {e}")
-    # The feature importance part is removed for now as it's part of the full
-    # trained object, not just the network. We can add it back if needed, but
-    # the priority is getting prediction to work.
+
     with col2:
-        st.info("Feature importance analysis is unavailable in this robust loading mode.")
+        st.subheader("Model Feature Importance")
+        try:
+            # The full model state is restored, so feature importances are available again!
+            importances = model.feature_importances_
+            importance_df = pd.DataFrame({
+                'Feature': feature_names, 'Importance': importances
+            }).sort_values(by='Importance', ascending=True)
+
+            fig_imp = go.Figure(go.Bar(x=importance_df['Importance'], y=importance_df['Feature'], orientation='h'))
+            fig_imp.update_layout(
+                title_text='Global Feature Importances', xaxis_title="Importance Score",
+                height=500, margin=dict(l=10, r=10, t=40, b=10)
+            )
+            st.plotly_chart(fig_imp, use_container_width=True)
+            
+        except Exception as e:
+            st.info(f"Feature importance not available. Details: {e}")
