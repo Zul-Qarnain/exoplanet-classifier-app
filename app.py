@@ -7,30 +7,40 @@ import json
 import torch
 import plotly.graph_objects as go
 from pathlib import Path
+import pickle
+import io
+
+# -----------------------------------------------------------------------------
+#  THE DEFINITIVE FIX: A CUSTOM UNPICKLER FOR JOBLIB
+#  This class tells joblib how to load PyTorch tensors. When it finds a tensor
+#  that was saved on a GPU, it intercepts it and maps it to the CPU.
+# -----------------------------------------------------------------------------
+class CPU_Unpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if module == 'torch.storage' and name == '_load_from_bytes':
+            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
+        else:
+            return super().find_class(module, name)
+# -----------------------------------------------------------------------------
 
 @st.cache_resource
 def load_model_and_features():
     """
-    Load the model and feature names.
-    This function uses torch.load with map_location to ensure that a model
-    saved on a GPU can be correctly loaded onto a CPU-only machine.
+    Load the model and feature names using a custom unpickler to handle
+    GPU-to-CPU model conversion seamlessly.
     """
-    model_path = Path('tabnet_exoplanet.pkl') # Use the original GPU-trained model file
+    model_path = Path('tabnet_exoplanet.pkl')
     features_path = Path('feature_list.json')
 
     if not model_path.exists() or not features_path.exists():
         st.error(f"Error: Make sure `tabnet_exoplanet.pkl` and `feature_list.json` are in the repository.")
         return None, None
 
-    # Load the model, remapping it to CPU if necessary
     try:
-        device = torch.device('cpu')
-        # Using joblib.load which correctly unpickles the scikit-learn wrapper object
-        model = joblib.load(model_path)
-        # Manually set the device on the loaded model to prevent it from trying to use a GPU
-        model.device = 'cpu'
-        model.network.to(device)
-        st.info("Model loaded in CPU mode.")
+        # Load the model using the custom unpickler
+        with open(model_path, 'rb') as f:
+            model = CPU_Unpickler(f).load()
+        st.success("Model loaded successfully in CPU mode.")
 
     except Exception as e:
         st.error(f"Failed to load the model. Error: {e}")
@@ -68,7 +78,6 @@ model, feature_names = load_model_and_features()
 st.title("🪐 TabNet Exoplanet Classifier")
 st.markdown("This app predicts if an exoplanet candidate is **CONFIRMED** or a **FALSE POSITIVE**.")
 
-# --- CORRECTED LINK ---
 VIRSYS_URL = "https://www.spaceappschallenge.org/2025/find-a-team/virsys/"
 st.sidebar.markdown("---")
 st.sidebar.markdown(f"Developed by **Team [Virsys]({VIRSYS_URL})**")
@@ -83,7 +92,6 @@ if model and feature_names:
         if st.button('Predict', type="primary", use_container_width=True):
             input_array = np.array([inputs[feature] for feature in feature_names]).reshape(1, -1)
             try:
-                # The TabNetClassifier object has a .predict_proba method
                 probabilities = model.predict_proba(input_array)[0]
                 prediction_index = np.argmax(probabilities)
                 class_mapping = {0: 'CONFIRMED', 1: 'FALSE POSITIVE'}
@@ -111,13 +119,7 @@ if model and feature_names:
     with col2:
         st.subheader("Model Feature Importance")
         try:
-            # Your robust method for getting importance is great
-            importances = None
-            if hasattr(model, "feature_importances_"):
-                importances = model.feature_importances_
-            else:
-                raise AttributeError("Model does not expose 'feature_importances_'.")
-
+            importances = model.feature_importances_
             importance_df = pd.DataFrame({
                 'Feature': feature_names, 'Importance': importances
             }).sort_values(by='Importance', ascending=True)
