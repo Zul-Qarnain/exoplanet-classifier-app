@@ -1,57 +1,54 @@
 # app.py
 import streamlit as st
-import joblib
 import numpy as np
 import pandas as pd
 import json
 import torch
 import plotly.graph_objects as go
 from pathlib import Path
-import pickle
-import io
-
-# -----------------------------------------------------------------------------
-#  THE DEFINITIVE FIX: A CUSTOM UNPICKLER FOR JOBLIB
-#  This class tells joblib how to load PyTorch tensors. When it finds a tensor
-#  that was saved on a GPU, it intercepts it and maps it to the CPU.
-# -----------------------------------------------------------------------------
-class CPU_Unpickler(pickle.Unpickler):
-    def find_class(self, module, name):
-        if module == 'torch.storage' and name == '_load_from_bytes':
-            return lambda b: torch.load(io.BytesIO(b), map_location='cpu')
-        else:
-            return super().find_class(module, name)
-# -----------------------------------------------------------------------------
+from pytorch_tabnet.tab_model import TabNetClassifier
 
 @st.cache_resource
 def load_model_and_features():
     """
-    Load the model and feature names using a custom unpickler to handle
-    GPU-to-CPU model conversion seamlessly.
+    Loads the model by first initializing a new TabNetClassifier structure
+    and then loading the saved weights into it. This is the most robust method.
     """
-    model_path = Path('model_compatible.pkl')
+    weights_path = Path('tabnet_network_weights.pth')
     features_path = Path('feature_list.json')
 
-    if not model_path.exists() or not features_path.exists():
-        st.error(f"Error: Make sure `tabnet_exoplanet.pkl` and `feature_list.json` are in the repository.")
+    if not weights_path.exists() or not features_path.exists():
+        st.error("Error: Make sure `tabnet_network_weights.pth` and `feature_list.json` are in the repository.")
         return None, None
 
-    try:
-        # Load the model using the custom unpickler
-        with open(model_path, 'rb') as f:
-            model = CPU_Unpickler(f).load()
-        st.success("Model loaded successfully in CPU mode.")
-
-    except Exception as e:
-        st.error(f"Failed to load the model. Error: {e}")
-        return None, None
-
-    # Load features
+    # Load features first to get model dimensions
     try:
         with open(features_path, 'r') as f:
             features = json.load(f)
     except Exception as e:
         st.error(f"Failed to read feature list: {e}")
+        return None, None
+
+    try:
+        # 1. Initialize a new, empty TabNetClassifier with the same structure
+        #    NOTE: If you used different parameters during your original training,
+        #    you MUST match them here. These are the defaults from your notebook.
+        model = TabNetClassifier(
+            n_steps=8, n_d=16, n_a=16, gamma=1.5,
+            mask_type="entmax"
+        )
+
+        # 2. Load the saved weights into the empty structure
+        #    map_location='cpu' ensures it loads on the CPU.
+        model.network.load_state_dict(torch.load(weights_path, map_location=torch.device('cpu')))
+        
+        # Manually set the device for the wrapper
+        model.device = 'cpu'
+
+        st.success("Model weights loaded successfully into new structure.")
+
+    except Exception as e:
+        st.error(f"Failed to load the model weights. Error: {e}")
         return None, None
 
     return model, features
@@ -107,29 +104,13 @@ if model and feature_names:
                     x=[f'{p:.1%}' for p in probabilities], y=['CONFIRMED', 'FALSE POSITIVE'],
                     orientation='h', marker_color=['#2ECC71', '#E74C3C']
                 ))
-                fig_prob.update_layout(
-                    title_text='Prediction Confidence', xaxis_title="Confidence",
-                    height=250, margin=dict(l=10, r=10, t=40, b=10)
-                )
+                fig_prob.update_layout(title_text='Prediction Confidence', height=250)
                 st.plotly_chart(fig_prob, use_container_width=True)
 
             except Exception as e:
                 st.error(f"An error occurred during prediction: {e}")
-
+    # The feature importance part is removed for now as it's part of the full
+    # trained object, not just the network. We can add it back if needed, but
+    # the priority is getting prediction to work.
     with col2:
-        st.subheader("Model Feature Importance")
-        try:
-            importances = model.feature_importances_
-            importance_df = pd.DataFrame({
-                'Feature': feature_names, 'Importance': importances
-            }).sort_values(by='Importance', ascending=True)
-
-            fig_imp = go.Figure(go.Bar(x=importance_df['Importance'], y=importance_df['Feature'], orientation='h'))
-            fig_imp.update_layout(
-                title_text='Global Feature Importances', xaxis_title="Importance Score",
-                height=500, margin=dict(l=10, r=10, t=40, b=10)
-            )
-            st.plotly_chart(fig_imp, use_container_width=True)
-            
-        except Exception as e:
-            st.info(f"Feature importance not available for this model. Details: {e}")
+        st.info("Feature importance analysis is unavailable in this robust loading mode.")
