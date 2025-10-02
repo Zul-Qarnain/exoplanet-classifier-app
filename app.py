@@ -29,7 +29,7 @@ def load_model_and_features():
     Load the model and feature names using a custom unpickler to handle
     GPU-to-CPU model conversion seamlessly.
     """
-    model_path = Path('tabnet_exoplanet.pkl')
+    model_path = Path('model_compatible.pkl')
     features_path = Path('feature_list.json')
 
     if not model_path.exists() or not features_path.exists():
