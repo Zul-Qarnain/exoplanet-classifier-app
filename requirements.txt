@@ -1,0 +1,9 @@
+# requirements.txt
+streamlit
+pandas
+numpy
+scikit-learn
+torch
+pytorch-tabnet
+joblib
+plotly
