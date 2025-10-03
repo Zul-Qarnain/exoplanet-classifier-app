@@ -57,7 +57,7 @@ def get_user_input(features):
     for feature in features:
         min_val, max_val, default_val = 0.0, 1000.0, 50.0
         if "period" in feature: max_val, default_val = 500.0, 10.0
-        elif "radius" in feature: max_val, default_val = 50.0, 5.0
+        elif "radius" in feature: max_val, default_val = 2000.0, 5.0
         elif "temp" in feature: max_val, default_val = 3000.0, 800.0
         elif "flux" in feature: max_val = 10000.0
         elif "depth" in feature: max_val = 20000.0
